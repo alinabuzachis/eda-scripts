@@ -1,0 +1,6 @@
+test_resource_prefix: ansible-cloudtrail-demo-eda
+cloudtrail_name: "{{ test_resource_prefix }}-trail"
+s3_bucket_name: "{{ test_resource_prefix }}-bucket"
+kms_key_alias: "{{ test_resource_prefix }}-key"
+key_prefix: "{{ test_resource_prefix }}"
+

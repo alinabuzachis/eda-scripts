@@ -1,0 +1,5 @@
+all:
+  hosts:
+    localhost:
+      ansible_python_interpreter: /home/alinabuzachis/tmp/venv-clean/bin/python3.11
+      ansible_connection: local

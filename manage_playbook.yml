@@ -1,0 +1,98 @@
+- hosts: fedora
+  tasks:
+    - name: Set 'test_resource_prefix' variable
+      ansible.builtin.set_fact:
+        test_resource_prefix: ansible-cloudtrail-demo-eda
+        operation: "{{ operation | default('deploy') }}"
+
+    - name: Set 's3_bucket_name', 'cloudtrail_name', 'kms_alias' and 'cloudtrail_prefix' variables
+      ansible.builtin.set_fact:
+        s3_bucket_name: "{{ test_resource_prefix }}-bucket"
+        cloudtrail_name: "{{ test_resource_prefix }}-trail"
+        kms_alias: "{{ test_resource_prefix }}-key"
+        cloudtrail_prefix: "{{ test_resource_prefix }}"
+
+    - block:
+      - name: Create S3 bucket
+        amazon.aws.s3_bucket:
+          state: present
+          name: "{{ s3_bucket_name }}"
+          policy: '{{ lookup("template", "s3-policy.j2") }}'
+
+      - name: Create KMS Key
+        amazon.aws.kms_key:
+          state: present
+          alias: "{{ kms_alias }}"
+          enabled: true
+          policy: "{{ lookup('template', 'kms-policy.j2') | to_json }}"
+        register: __create_kms_key
+
+      - name: Set 'kms_key_id' variable
+        ansible.builtin.set_fact:
+          kms_key_id: "{{ __create_kms_key.key_id }}"
+
+      - name: Create a trail
+        amazon.aws.cloudtrail:
+          state: present
+          name: "{{ cloudtrail_name }}"
+          s3_bucket_name: "{{ s3_bucket_name }}"
+          s3_key_prefix: "{{ cloudtrail_prefix }}"
+        register: __create_trail
+
+      - name: Gather information about the trail
+        amazon.aws.cloudtrail_info:
+          trail_names:
+            - "{{ cloudtrail_name }}"
+        register: __trail_info
+
+      - name: Gather information about the KMS key
+        amazon.aws.kms_key_info:
+          alias: "{{ kms_alias  }}"
+        register: __kms_key_info
+
+      - name: Set 'kms_key_arn' variable
+        ansible.builtin.set_fact:
+          kms_key_arn: "{{ __kms_key_info.kms_keys.0.key_arn }}"
+
+      - name: Enable encryption on the trail
+        amazon.aws.cloudtrail:
+          state: present
+          name: "{{ cloudtrail_name }}"
+          kms_key_id: "{{ kms_key_arn }}"
+          s3_bucket_name: "{{__trail_info.trail_list.0.s3_bucket_name}}"
+          s3_key_prefix: "{{__trail_info.trail_list.0.s3_key_prefix}}"
+        register: __enable_encyption
+      when: operation == "deploy"
+
+    - name: Delete KMS Key
+      amazon.aws.aws_kms:
+        state: absent
+        alias: "{{ kms_alias }}"
+        enabled: true
+        policy: "{{ lookup('template', 'kms-policy.j2') | to_json }}"
+      register: __create_kms_key
+      when: operation == "delete_key"
+
+    - name: Disable encryption on the trail
+      amazon.aws.cloudtrail:
+        state: present
+        name: "{{ cloudtrail_name }}"
+        kms_key_id: ""
+        s3_bucket_name: "{{ s3_bucket_name }}"
+      register: __disable_encyption
+      when: operation == "disable_encryption"
+
+    - name: Delete a trail
+      amazon.aws.cloudtrail:
+        state: absent
+        name: "{{ cloudtrail_name }}"
+        s3_bucket_name: "{{ s3_bucket_name }}"
+      register: __delete_trail
+      when: operation == "delete_trail"
+
+    - name: Delete S3 bucket
+      amazon.aws.s3_bucket:
+        state: absent
+        name: "{{ s3_bucket_name }}"
+        force: true
+      when: operation == "delete_bucket"
